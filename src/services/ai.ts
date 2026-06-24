@@ -7,44 +7,64 @@ export interface Question {
   explanation: string;
 }
 
-const AI_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.3-70b-versatile';
+const BASE_URL = 'https://router-api.0g.ai/v1';
+const OG_ENDPOINT = `${BASE_URL}/chat/completions`;
 
-async function callAI(prompt: string, maxTokens: number = 2000): Promise<string> {
-  const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+// ⚠️ keep this configurable (some 0G setups require different models)
+const MODEL = 'glm-5.2';
+
+async function callAI(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number = 1000
+): Promise<string> {
+  const apiKey = import.meta.env.VITE_0G_API_KEY;
 
   if (!apiKey) {
-    return generateEnhancedMock(prompt);
+    console.warn('Missing VITE_0G_API_KEY');
+    throw new Error('API key missing');
   }
 
   try {
-    const response = await fetch(AI_ENDPOINT, {
+    const response = await fetch(OG_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: MODEL,
-        messages: [{ role: 'user', content: prompt }],
         max_tokens: maxTokens,
-        temperature: 0.7,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
       }),
     });
 
+    const rawText = await response.text();
+
     if (!response.ok) {
-      throw new Error(`AI API error: ${response.status}`);
+      console.error('0G API error response:', rawText);
+      throw new Error(`API error: ${response.status}`);
     }
 
-    const data = await response.json();
-    return data.choices[0]?.message?.content || generateEnhancedMock(prompt);
+    const data = JSON.parse(rawText);
+
+    const content = data?.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new Error('Empty AI response');
+    }
+
+    return content;
   } catch (error) {
     console.error('AI call failed:', error);
-    return generateEnhancedMock(prompt);
+    throw error; // 🚨 IMPORTANT: don’t silently fallback while debugging
   }
 }
 
-function generateEnhancedMock(prompt: string): string {
+function generateFallbackContent(prompt: string): string {
   const docMatch = prompt.match(/document named "([^"]+)"/i);
   const docName = docMatch ? docMatch[1] : 'your lecture';
 
@@ -89,94 +109,89 @@ Because understanding this stuff is like having a secret key. Once you get it, a
   return '';
 }
 
+const VOICE_SYSTEM_PROMPT = `You are the AI inside StudyProof, a study companion for students. Your job is to take complex lecture material and make it genuinely understandable.
+
+Voice rules:
+- Warm, encouraging, and clear — like a smart older sibling who's good at explaining things
+- Never condescending, never robotic, never corporate
+- Use plain language by default — only use technical terms when necessary, and always explain them immediately
+- Short paragraphs, lots of breathing room
+- For simple explanations, lean fully into analogy and everyday examples
+- Be playful and encouraging — studying should feel achievable, not punishing
+- Phrases to use: "okay so basically...", "here's the thing about...", "think of it like...", "the key thing to remember is..."
+- Phrases to NEVER use: "it is important to note that...", "in summary...", "as mentioned previously...", "this document discusses..."`;
+
 export async function generateSummary(pdfContent: string, fileName: string): Promise<string> {
-  const prompt = `You are a friendly study companion. A student uploaded a document named "${fileName}" with this content:
+  return callAI(
+    VOICE_SYSTEM_PROMPT,
+    `A student uploaded a document named "${fileName}". Here's the content:
 
 """
 ${pdfContent.slice(0, 4000)}
 """
 
-Write a clear, friendly summary of this document. Use these guidelines:
+Write a clear, friendly summary. Use these guidelines:
 - Write like a smart friend explaining it, not a textbook
-- Use short paragraphs with breathing room
-- Start with "Okay so basically..."
-- Use headings like "### Key Topic 1:" for main sections
-- End with a "Bottom line:" takeaway
+- Short paragraphs with breathing room
+- Start with "okay so basically..."
+- Use headings like "### Key Topic:" for main sections
+- End with a one-line "bottom line:" takeaway
 - Be encouraging and warm
-- No jargon without explaining it
-
-Format with markdown. Keep it under 500 words.`;
-
-  return callAI(prompt, 1500);
+- Use markdown formatting. Keep it under 500 words.`,
+    1000
+  );
 }
 
 export async function generateSimpleExplanation(pdfContent: string, fileName: string): Promise<string> {
-  const prompt = `You are explaining a document to a curious 10-year-old. The document "${fileName}" contains:
+  return callAI(
+    VOICE_SYSTEM_PROMPT,
+    `Explain this document to a curious 10-year-old. The document "${fileName}" contains:
 
 """
 ${pdfContent.slice(0, 4000)}
 """
 
-Explain this in the simplest way possible:
-- Use everyday analogies (like riding a bike, video games, cooking)
-- Start with "So what's this really about?"
+Explain it as simply as possible:
+- Use everyday analogies (bikes, video games, cooking, sports)
+- Start with "so what's this really about?"
 - Use **bold** for section headers
 - Keep each section short and punchy
 - Make the reader go "oh, THAT'S what that means"
-- Be fun and encouraging, never condescending
-
-Format with markdown. Keep it under 400 words.`;
-
-  return callAI(prompt, 1200);
+- Fun and encouraging tone throughout
+- Use markdown. Keep it under 400 words.`,
+    1000
+  );
 }
 
-export async function generateQuestions(pdfContent: string, fileName: string): Promise<Question[]> {
-  const prompt = `You are creating practice questions for a student who just studied "${fileName}". The content is:
+export async function generateQuestions(
+  pdfContent: string,
+  fileName: string
+): Promise<Question[]> {
+  const response = await callAI(
+    VOICE_SYSTEM_PROMPT,
+    `Create 6 practice questions for "${fileName}".
 
+Return ONLY valid JSON array of questions.
+
+Content:
 """
 ${pdfContent.slice(0, 3000)}
-"""
-
-Generate 6 practice questions in this exact JSON format (no markdown, just pure JSON):
-[
-  {
-    "id": 1,
-    "type": "multiple",
-    "question": "Question text here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "answer": "Option A",
-    "explanation": "Brief friendly explanation of why this is correct"
-  },
-  {
-    "id": 2,
-    "type": "truefalse",
-    "question": "Statement to evaluate?",
-    "answer": "True",
-    "explanation": "Why this is true/false"
-  },
-  {
-    "id": 3,
-    "type": "short",
-    "question": "Open-ended question?",
-    "answer": "Key points the answer should cover",
-    "explanation": "What a good answer includes"
-  }
-]
-
-Mix multiple choice, true/false, and short answer. Make questions that test understanding, not memorization. Be encouraging in explanations.`;
-
-  const response = await callAI(prompt, 2000);
+"""`,
+    1000
+  );
 
   try {
-    const jsonMatch = response.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-  } catch (e) {
-    console.error('Failed to parse questions:', e);
-  }
+    const parsed = JSON.parse(response);
 
-  return getDefaultQuestions(fileName);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+
+    throw new Error('Response is not an array');
+  } catch (e) {
+    console.error('Failed to parse AI JSON:', e);
+    return getDefaultQuestions(fileName);
+  }
 }
 
 function getDefaultQuestions(fileName: string): Question[] {
@@ -194,7 +209,7 @@ function getDefaultQuestions(fileName: string): Question[] {
       type: 'truefalse',
       question: 'Understanding the foundation concepts helps with learning advanced topics.',
       answer: 'True',
-      explanation: 'Building a strong foundation makes everything else easier to understand - just like building blocks!'
+      explanation: 'Building a strong foundation makes everything else easier — just like building blocks!'
     },
     {
       id: 3,
@@ -206,7 +221,7 @@ function getDefaultQuestions(fileName: string): Question[] {
     {
       id: 4,
       type: 'multiple',
-      question: 'Which approach helps most when studying this material?',
+      question: 'Which approach helps most when studying complex material?',
       options: ['Reading once and moving on', 'Breaking it into smaller chunks', 'Memorizing every word', 'Skipping the hard parts'],
       answer: 'Breaking it into smaller chunks',
       explanation: 'Taking it step by step helps your brain process and retain information better.'
@@ -214,7 +229,7 @@ function getDefaultQuestions(fileName: string): Question[] {
     {
       id: 5,
       type: 'truefalse',
-      question: 'You need to be a genius to understand this material.',
+      question: 'You need to be a genius to understand complex academic material.',
       answer: 'False',
       explanation: 'Not at all! You just need clear explanations and practice. Anyone can learn this.'
     },
@@ -223,7 +238,7 @@ function getDefaultQuestions(fileName: string): Question[] {
       type: 'short',
       question: "How would you explain the main concept to a friend who hasn't read this?",
       answer: 'The main concept is about understanding the fundamentals and building up from there.',
-      explanation: 'If you can explain it simply to someone else, you truly understand it!'
+      explanation: "If you can explain it simply to someone else, you truly understand it!"
     }
   ];
 }

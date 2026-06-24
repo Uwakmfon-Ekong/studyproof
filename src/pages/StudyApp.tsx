@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Upload, FileText, Sparkles, BookOpen, HelpCircle, Award,
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { generateSummary, generateSimpleExplanation, generateQuestions } from '../services/ai';
 import type { Question } from '../services/ai';
+import { downloadCertificate } from '../utils/certificate';
 
 type AppStep = 'upload' | 'processing' | 'results' | 'certificate';
 type ResultTab = 'summary' | 'explain' | 'questions';
@@ -63,26 +64,30 @@ async function extractPDFContent(file: File): Promise<{ content: string; pageCou
         const arrayBuffer = reader.result as ArrayBuffer;
         const uint8Array = new Uint8Array(arrayBuffer);
 
-        let text = '';
+        // Count actual PDF pages by counting /Page objects
+        const text = new TextDecoder('latin1').decode(uint8Array);
+        const pageMatches = text.match(/\/Type\s*\/Page[^s]/g);
+        const pageCount = pageMatches ? pageMatches.length : 1;
+
+        // Extract readable text
+        let readable = '';
         for (let i = 0; i < uint8Array.length; i++) {
           const byte = uint8Array[i];
           if (byte >= 32 && byte < 127) {
-            text += String.fromCharCode(byte);
+            readable += String.fromCharCode(byte);
           } else if (byte === 10 || byte === 13) {
-            text += ' ';
+            readable += ' ';
           }
         }
 
-        const cleanText = text
+        const cleanText = readable
           .replace(/[^\x20-\x7E\n]/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
 
-        const pageCount = Math.max(1, Math.floor(uint8Array.length / 3000));
-
         resolve({ content: cleanText || `Content from ${file.name}`, pageCount });
       } catch (e) {
-        resolve({ content: `Document: ${file.name}`, pageCount: Math.floor(Math.random() * 10) + 5 });
+        resolve({ content: `Document: ${file.name}`, pageCount: 1 });
       }
     };
     reader.readAsArrayBuffer(file);
@@ -153,7 +158,6 @@ export default function StudyApp() {
       ]);
 
       setProcessingProgress(100);
-
       setResults({ summary, simpleExplanation, questions });
       setStep('results');
     } catch (error) {
@@ -213,7 +217,6 @@ export default function StudyApp() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white via-violet-50/30 to-amber-50/20">
-      {/* Header */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-violet-100">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -258,7 +261,7 @@ export default function StudyApp() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
-        {/* Upload Step */}
+
         {step === 'upload' && (
           <div className="animate-fade-in-up">
             <div className="text-center mb-8">
@@ -329,7 +332,6 @@ export default function StudyApp() {
           </div>
         )}
 
-        {/* Processing Step */}
         {step === 'processing' && (
           <div className="animate-fade-in-up flex flex-col items-center justify-center min-h-[60vh]">
             <div className="relative mb-8">
@@ -353,7 +355,6 @@ export default function StudyApp() {
           </div>
         )}
 
-        {/* Results Step */}
         {step === 'results' && results && (
           <div className="animate-fade-in-up">
             <div className="text-center mb-8">
@@ -361,7 +362,6 @@ export default function StudyApp() {
               <p className="text-gray-600">your lecture, decoded and ready to study</p>
             </div>
 
-            {/* Tabs */}
             <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
               {[
                 { id: 'summary', label: 'summary', icon: BookOpen },
@@ -383,7 +383,6 @@ export default function StudyApp() {
               ))}
             </div>
 
-            {/* Tab Content */}
             <div className="card-warm rounded-3xl p-6 md:p-8">
               {activeTab === 'summary' && (
                 <div className="prose prose-violet max-w-none">
@@ -483,7 +482,6 @@ export default function StudyApp() {
               )}
             </div>
 
-            {/* Generate Certificate CTA */}
             <div className="mt-8 text-center">
               <div className="card-warm rounded-2xl p-6 inline-block">
                 <p className="text-gray-600 mb-4">ready to lock in your study session?</p>
@@ -499,7 +497,6 @@ export default function StudyApp() {
           </div>
         )}
 
-        {/* Certificate Step */}
         {step === 'certificate' && certificate && (
           <div className="animate-fade-in-up">
             <div className="text-center mb-8">
@@ -510,17 +507,14 @@ export default function StudyApp() {
               <p className="text-gray-600">your study session is verified and locked onchain</p>
             </div>
 
-            {/* Certificate Card */}
             <div className="relative max-w-lg mx-auto">
               <div className="absolute inset-0 bg-gradient-to-br from-violet-200 to-amber-100 rounded-3xl transform rotate-1 opacity-50" />
               <div className="relative bg-gradient-to-br from-white via-violet-50 to-amber-50 rounded-3xl p-8 md:p-10 border-2 border-violet-200 shadow-xl">
-                {/* Decorative corners */}
                 <div className="absolute top-4 left-4 w-8 h-8 border-t-2 border-l-2 border-violet-300 rounded-tl-lg" />
                 <div className="absolute top-4 right-4 w-8 h-8 border-t-2 border-r-2 border-violet-300 rounded-tr-lg" />
                 <div className="absolute bottom-4 left-4 w-8 h-8 border-b-2 border-l-2 border-violet-300 rounded-bl-lg" />
                 <div className="absolute bottom-4 right-4 w-8 h-8 border-b-2 border-r-2 border-violet-300 rounded-br-lg" />
 
-                {/* Header */}
                 <div className="text-center mb-6">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <Sparkles className="w-6 h-6 text-violet-500" />
@@ -531,14 +525,12 @@ export default function StudyApp() {
                   <p className="text-sm text-gray-500 mt-1">verified on 0G</p>
                 </div>
 
-                {/* Seal */}
                 <div className="flex justify-center mb-6">
                   <div className="w-20 h-20 bg-gradient-to-br from-amber-300 to-amber-400 rounded-full flex items-center justify-center shadow-lg animate-pulse-soft">
                     <Award className="w-10 h-10 text-white" />
                   </div>
                 </div>
 
-                {/* Details */}
                 <div className="space-y-4 text-center">
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Document Studied</p>
@@ -560,9 +552,11 @@ export default function StudyApp() {
               </div>
             </div>
 
-            {/* Actions */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
-              <button className="btn-secondary text-violet-600 px-6 py-3 rounded-full font-semibold flex items-center justify-center gap-2">
+              <button
+                onClick={() => certificate && downloadCertificate(certificate)}
+                className="btn-secondary text-violet-600 px-6 py-3 rounded-full font-semibold flex items-center justify-center gap-2"
+              >
                 <Download className="w-5 h-5" />
                 download certificate
               </button>
@@ -575,7 +569,6 @@ export default function StudyApp() {
               </button>
             </div>
 
-            {/* Start Over */}
             <div className="text-center mt-8">
               <button
                 onClick={resetApp}
